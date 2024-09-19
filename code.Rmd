@@ -1,0 +1,163 @@
+---
+title: "US-AMS AmeriFlux Formatting"
+author: "Gavin McNicol"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+load libraries
+
+```{r}
+library(tidyverse)
+library(skimr)
+```
+
+Get data
+
+```{r}
+data <- read_csv("data/ATMOS_L3_2024-08-12_ch4gapfilled_fluxnet.csv")
+```
+
+```{r}
+skim(data)
+```
+
+## AmeriFlux Fail 1 Are Timestamp variables present?	FAIL 
+Expected timestamp variable(s) TIMESTAMP_START is / are missing.
+
+Check what `TIMESTAMP` corresponds with. 
+
+```{r}
+data %>% 
+  select(contains("TIMESTAMP"))
+```
+
+Shift TIMESTAMP down by one row and fill first cell. Then rename as TIMESTAMP_START. Gather TIMESTAMP_END to second row:
+
+```{r}
+data_1 <- data %>% 
+  mutate(TIMESTAMP = lag(TIMESTAMP, 1, 202205241000)) %>% 
+  rename(TIMESTAMP_START = TIMESTAMP) 
+```
+
+## AmeriFlux Fail Are Timestamp variables as expected?	FAIL
+These unexpected variables were found in columns 1 & 2 instead of TIMESTAMP_START and TIMESTAMP_END: TIMESTAMP, DATE
+
+Move TIMESTAMP_END to second column. Delete `Timestamp` redundant variable.
+
+```{r}
+data_2 <- data_1 %>% 
+  select(TIMESTAMP_START, TIMESTAMP_END, everything()) %>% 
+  select(-Timestamp) 
+```
+
+
+## AmeriFlux Fail Any invalid Missing-Value Formats?	FAIL
+Missing values are not indicated with -9999 for these variables (number of timestamps): 
+MANY vars.    
+
+
+Missing values are filled with double type not integer -9999. Try fixing:  
+
+- write function to take vector, convert -9999 to NA (Have to remove date type columns!)
+- convert data_2 into a list of vectors
+- map function to list
+- convert list back to data_2 data_frame
+- after writing out data as .csv, replace NA with -9999 integer
+
+```{r}
+fix_missing <- function(vector){
+  
+  if(typeof(vector) == "double"){
+    vector %>% 
+      na_if(-9999) %>% 
+      na_if(9999.99)
+  }
+  else
+  {
+    vector
+  }
+} 
+```
+
+test function: works except on date or datetime vars so remove those from data_2
+
+```{r}
+x <- as.POSIXct( c(1, 2, 3, -9999, 9999.99) )
+typeof(x)
+fix_missing(x) 
+```
+
+remove all date-and-time type columns
+
+```{r}
+data_2 <- data_2 %>% 
+  select(-date, -DATE, -datetime, -time, -time_local, -time_local.met)
+```
+
+turn data_2 into a list
+
+```{r}
+data_2_list <- as.list(data_2)
+```
+
+map custom na_if function
+
+```{r}
+data_2_list <- map(data_2_list, fix_missing)
+```
+
+convert back to data frame
+
+```{r}
+data_3 <- as_tibble(data_2_list)
+# skim(data_3)
+```
+
+## AmeriFlux Fail Issues that cannot be autocorrected.	FAIL
+File has duplicate variables DATE (column 4); TIME (column 277); TIMESTAMP (column 432); YEAR (column 434). File had issues that could not be automatically corrected. Autocorrection FAILED.
+
+check to see if these have been completely removed:
+
+`year` is still present
+
+```{r}
+data_3 %>% 
+  select(year)
+```
+
+```{r}
+data_3 <- 
+  data_3 %>% 
+  select(-year)
+```
+
+
+# File name fixes
+
+## AmeriFlux Fail Timestamp problem encountered.	FAIL
+These Format QA/QC assessments could not be completed: Do filename time components match file time period? Is Timestamp resolution OK? Any Timestamp duplicates?
+
+## AmeriFlux Fail Is Filename Format valid?	FAIL
+Is Filename Format valid?	FAIL
+
+## AmeriFlux Fail Is Filename Format valid?	WARNING
+These filename components are not in the standard AmeriFlux format: ts-start (start time), optional parameter included (will be removed in autocorrected file)
+
+write out correctly
+
+```{r}
+names(data_3)
+```
+
+
+```{r}
+data_3 %>% 
+  write_csv("data/US-AMS_HH_202205241000_202312201500.csv", na = "-9999")
+```
+
+
